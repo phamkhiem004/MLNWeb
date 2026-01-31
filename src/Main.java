@@ -361,24 +361,43 @@ public class Main {
 
                 "</style>" +
                 "<script>" +
-                "// 1. Khi trang web tải xong, kiểm tra danh sách đen\n" +
+
+                // --- DANH SÁCH TỪ CẤM (Sửa ở đây) ---
+                "var BAD_WORDS = ['ngu', 'chó', 'chết', 'bậy', 'tục', 'điên', 'buồi', 'cặc', 'lồn','giết'];\n" +
+
+                // 1. Hàm kiểm duyệt trước khi gửi
+                "function checkContent(event) {\n" +
+                "   var input = document.getElementsByName('thought')[0];\n" +
+                "   var content = input.value.toLowerCase();\n" +
+                "   \n" +
+                "   for (var i = 0; i < BAD_WORDS.length; i++) {\n" +
+                "       if (content.includes(BAD_WORDS[i])) {\n" +
+                "           alert('⚠️ CẢNH BÁO: Bình luận của bạn vi phạm tiêu chuẩn cộng đồng! Vui lòng sử dụng ngôn từ văn minh.');\n"
+                +
+                "           event.preventDefault(); // Chặn không cho gửi đi\n" +
+                "           return false;\n" +
+                "       }\n" +
+                "   }\n" +
+                "   return true;\n" +
+                "}\n" +
+
+                // 2. Logic ẩn bài viết cũ
                 "document.addEventListener('DOMContentLoaded', function() {\n" +
+                "   var form = document.querySelector('.post-form');\n" +
+                "   if(form) form.setAttribute('onsubmit', 'return checkContent(event)');\n" + // Gắn bộ lọc vào form
+                "   \n" +
                 "   var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');\n" +
                 "   hiddenList.forEach(function(id) {\n" +
                 "       var el = document.getElementById('post-' + id);\n" +
-                "       if(el) el.style.display = 'none';\n" + // Ẩn ngay lập tức
+                "       if(el) el.style.display = 'none';\n" +
                 "   });\n" +
                 "});\n" +
-                "\n" +
-                "// 2. Hàm ẩn bài viết cập nhật mới\n" +
+
                 "function hidePost(id) {\n" +
                 "   var element = document.getElementById('post-' + id);\n" +
                 "   if(element) {\n" +
-                "       // Hiệu ứng mờ dần cho đẹp\n" +
                 "       element.style.opacity = '0';\n" +
                 "       setTimeout(function(){ element.style.display = 'none'; }, 500);\n" +
-                "       \n" +
-                "       // Lưu ID bài viết vào bộ nhớ trình duyệt\n" +
                 "       var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');\n" +
                 "       if (!hiddenList.includes(id)) {\n" +
                 "           hiddenList.push(id);\n" +
