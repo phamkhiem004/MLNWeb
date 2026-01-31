@@ -61,7 +61,7 @@ public class Main {
 
         server.setExecutor(null);
         server.start();
-        System.out.println("Agora 4.0 (Like/Dislike) đã chạy tại port " + port);
+        System.out.println("Server chạy tại http://localhost:" + port);
     }
 
     // --- 1. XỬ LÝ DATABASE (CẬP NHẬT ĐỂ ĐỌC ĐƯỢC DISLIKE) ---
@@ -154,7 +154,7 @@ public class Main {
         public void handle(HttpExchange t) throws IOException {
             String html = getHeader("Sảnh Chính") +
                     "<div class='container'>" +
-                    "  <h1>🏛️ THE DIGITAL AGORA</h1>" +
+                    "  <h1>🏛️ CÁNH CỬA TRIẾT HỌC</h1>" +
                     "  <p>Chào mừng lữ khách. Bạn muốn bước vào cánh cửa nào hôm nay?</p>" +
                     "  <div class='nav-grid'>" +
                     "    <a href='/room?type=stoic' class='card choice'>🛡️ Khắc Kỷ</a>" +
