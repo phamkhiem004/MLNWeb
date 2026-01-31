@@ -10,23 +10,24 @@ import java.util.*;
 
 public class Main {
 
-    // --- CẤU TRÚC DỮ LIỆU ---
+    // --- CẤU TRÚC DỮ LIỆU CẬP NHẬT ---
     static class Post {
         int id;
         String content;
         int likes;
+        int dislikes; // <--- MỚI: Thêm biến đếm dislike
 
-        public Post(int id, String content, int likes) {
+        public Post(int id, String content, int likes, int dislikes) {
             this.id = id;
             this.content = content;
             this.likes = likes;
+            this.dislikes = dislikes;
         }
 
-        // Chuyển đối tượng thành chuỗi để lưu vào file (dạng: id|likes|content)
+        // Lưu dạng: id|likes|dislikes|content
         public String toFileString() {
-            // Thay thế ký tự xuống dòng để tránh lỗi file
             String cleanContent = content.replace("\n", " ").replace("|", "-");
-            return id + "|" + likes + "|" + cleanContent;
+            return id + "|" + likes + "|" + dislikes + "|" + cleanContent;
         }
     }
 
@@ -40,15 +41,14 @@ public class Main {
         }
     }
 
-    // --- KHO CHỨA & DATABASE FILE ---
-    private static final String DB_FILE = "minidb.txt"; // Tên file lưu dữ liệu
+    private static final String DB_FILE = "minidb.txt";
     private static List<Post> communityPosts = new ArrayList<>();
     private static int postIdCounter = 1;
     private static Map<String, List<Wisdom>> schools = new HashMap<>();
 
     public static void main(String[] args) throws IOException {
-        initData(); // Nạp danh ngôn
-        loadPostsFromFile(); // <--- MỚI: Khôi phục dữ liệu cũ khi khởi động
+        initData();
+        loadPostsFromFile(); // Nạp dữ liệu cũ
 
         int port = 8080;
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
@@ -57,14 +57,14 @@ public class Main {
         server.createContext("/room", new RoomHandler());
         server.createContext("/post", new PostHandler());
         server.createContext("/like", new LikeHandler());
+        server.createContext("/dislike", new DislikeHandler()); // <--- MỚI: Xử lý dislike
 
         server.setExecutor(null);
         server.start();
-        System.out.println("Agora 3.0 (Có lưu trữ) đã chạy tại port " + port);
+        System.out.println("Agora 4.0 (Like/Dislike) đã chạy tại port " + port);
     }
 
-    // --- 1. XỬ LÝ DATABASE (FILE TEXT) ---
-    // Lưu toàn bộ danh sách xuống file
+    // --- 1. XỬ LÝ DATABASE (CẬP NHẬT ĐỂ ĐỌC ĐƯỢC DISLIKE) ---
     private static void savePostsToFile() {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(DB_FILE))) {
             for (Post p : communityPosts) {
@@ -72,47 +72,90 @@ public class Main {
                 writer.newLine();
             }
         } catch (IOException e) {
-            System.out.println("Lỗi lưu file: " + e.getMessage());
+            System.out.println("Lỗi lưu file");
         }
     }
 
-    // Đọc dữ liệu từ file lên RAM
     private static void loadPostsFromFile() {
         File file = new File(DB_FILE);
         if (!file.exists())
-            return; // Nếu chưa có file thì thôi
+            return;
 
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
             communityPosts.clear();
             int maxId = 0;
             while ((line = reader.readLine()) != null) {
-                // Tách chuỗi: id|likes|content
-                String[] parts = line.split("\\|", 3);
-                if (parts.length == 3) {
+                // Cố gắng tách thành 4 phần: id|likes|dislikes|content
+                String[] parts = line.split("\\|", 4);
+
+                if (parts.length >= 3) {
                     int id = Integer.parseInt(parts[0]);
                     int likes = Integer.parseInt(parts[1]);
-                    String content = parts[2];
-                    communityPosts.add(new Post(id, content, likes));
+                    // Logic tương thích ngược: Nếu file cũ chưa có dislike thì mặc định là 0
+                    int dislikes = (parts.length == 4) ? Integer.parseInt(parts[2]) : 0;
+                    String content = (parts.length == 4) ? parts[3] : parts[2];
 
+                    communityPosts.add(new Post(id, content, likes, dislikes));
                     if (id > maxId)
                         maxId = id;
                 }
             }
-            postIdCounter = maxId + 1; // Cập nhật bộ đếm ID tiếp theo
-        } catch (IOException e) {
-            System.out.println("Lỗi đọc file: " + e.getMessage());
+            postIdCounter = maxId + 1;
+        } catch (Exception e) {
+            System.out.println("Lỗi đọc file (có thể do định dạng cũ): " + e.getMessage());
         }
     }
 
-    // --- 2. XỬ LÝ TRANG CHỦ ---
+    // --- 2. XỬ LÝ HANDLERS ---
+
+    // Xử lý Like
+    static class LikeHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            handleReaction(t, true);
+        }
+    }
+
+    // Xử lý Dislike (MỚI)
+    static class DislikeHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            handleReaction(t, false);
+        }
+    }
+
+    // Hàm chung để xử lý Like/Dislike cho gọn code
+    private static void handleReaction(HttpExchange t, boolean isLike) throws IOException {
+        if ("POST".equals(t.getRequestMethod())) {
+            String body = getRequestBody(t);
+            if (body.startsWith("id=")) {
+                try {
+                    int id = Integer.parseInt(body.split("id=")[1]);
+                    for (Post p : communityPosts) {
+                        if (p.id == id) {
+                            if (isLike)
+                                p.likes++;
+                            else
+                                p.dislikes++;
+                            savePostsToFile(); // Lưu ngay
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                }
+            }
+        }
+        redirectHome(t);
+    }
+
     static class HomeHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
             String html = getHeader("Sảnh Chính") +
                     "<div class='container'>" +
                     "  <h1>🏛️ THE DIGITAL AGORA</h1>" +
-                    "  <p>Nơi lưu giữ những suy tư (Đã có tính năng lưu trữ vĩnh viễn).</p>" +
+                    "  <p>Chào mừng lữ khách. Bạn muốn bước vào cánh cửa nào hôm nay?</p>" +
                     "  <div class='nav-grid'>" +
                     "    <a href='/room?type=stoic' class='card choice'>🛡️ Khắc Kỷ</a>" +
                     "    <a href='/room?type=exist' class='card choice'>🌑 Hiện Sinh</a>" +
@@ -135,54 +178,28 @@ public class Main {
         }
     }
 
-    // --- 3. XỬ LÝ ĐĂNG BÀI (CÓ LƯU) ---
     static class PostHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
             if ("POST".equals(t.getRequestMethod())) {
                 String body = getRequestBody(t);
                 if (body.startsWith("thought=")) {
-                    String rawContent = body.split("thought=")[1];
-                    String decodedContent = URLDecoder.decode(rawContent, StandardCharsets.UTF_8.name());
-
-                    // Thêm mới
+                    String raw = body.split("thought=")[1];
+                    String content = URLDecoder.decode(raw, StandardCharsets.UTF_8.name())
+                            .replace("<", "&lt;") // Biến dấu < thành ký tự an toàn
+                            .replace(">", "&gt;"); // Biến dấu > thành ký tự an toàn
                     if (communityPosts.size() >= 50)
-                        communityPosts.remove(0); // Giới hạn 50 bài
-                    communityPosts.add(new Post(postIdCounter++, decodedContent, 0));
-
-                    savePostsToFile(); // <--- QUAN TRỌNG: Lưu ngay xuống file
+                        communityPosts.remove(0);
+                    // Tạo bài mới: likes=0, dislikes=0
+                    communityPosts.add(new Post(postIdCounter++, content, 0, 0));
+                    savePostsToFile();
                 }
             }
             redirectHome(t);
         }
     }
 
-    // --- 4. XỬ LÝ LIKE (CÓ LƯU) ---
-    static class LikeHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange t) throws IOException {
-            if ("POST".equals(t.getRequestMethod())) {
-                String body = getRequestBody(t);
-                if (body.startsWith("id=")) {
-                    try {
-                        int idToLike = Integer.parseInt(body.split("id=")[1]);
-                        for (Post p : communityPosts) {
-                            if (p.id == idToLike) {
-                                p.likes++;
-                                savePostsToFile(); // <--- QUAN TRỌNG: Lưu like xuống file
-                                break;
-                            }
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-            redirectHome(t);
-        }
-    }
-
-    // --- CÁC HÀM CŨ (KHÔNG ĐỔI) ---
+    // --- 3. UI CẬP NHẬT (THÊM NÚT DISLIKE) ---
     private static String renderCommunityWall() {
         if (communityPosts.isEmpty())
             return "<p style='opacity:0.6; text-align:center'>Chưa có suy tư nào.</p>";
@@ -192,17 +209,30 @@ public class Main {
             sb.append("<div class='wall-msg' id='post-").append(p.id).append("'>")
                     .append("  <div class='msg-content'>❝ ").append(p.content).append(" ❞</div>")
                     .append("  <div class='msg-actions'>")
+
+                    // Nút Like
                     .append("    <form action='/like' method='post' style='display:inline'>")
                     .append("      <input type='hidden' name='id' value='").append(p.id).append("'>")
                     .append("      <button type='submit' class='btn-like'>❤️ ").append(p.likes).append("</button>")
                     .append("    </form>")
-                    .append("    <button onclick='hidePost(").append(p.id).append(")' class='btn-hide'>🙈 Ẩn</button>")
+
+                    // Nút Dislike (MỚI)
+                    .append("    <form action='/dislike' method='post' style='display:inline'>")
+                    .append("      <input type='hidden' name='id' value='").append(p.id).append("'>")
+                    .append("      <button type='submit' class='btn-dislike'>💔 ").append(p.dislikes)
+                    .append("</button>")
+                    .append("    </form>")
+
+                    // Nút Ẩn (Sửa lỗi reload trang)
+                    .append("    <button type='button' onclick='hidePost(").append(p.id)
+                    .append(")' class='btn-hide'>🙈 Ẩn</button>")
                     .append("  </div>")
                     .append("</div>");
         }
         return sb.toString();
     }
 
+    // --- CÁC HÀM CŨ GIỮ NGUYÊN HOẶC CHỈNH SỬA NHỎ ---
     static class RoomHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
@@ -210,16 +240,13 @@ public class Main {
             String type = (query != null && query.contains("type=")) ? query.split("type=")[1] : "stoic";
             List<Wisdom> roomData = schools.getOrDefault(type, schools.get("stoic"));
             Wisdom w = roomData.get(new Random().nextInt(roomData.size()));
-            String title = type.equals("stoic") ? "Phòng Khắc Kỷ"
-                    : (type.equals("exist") ? "Phòng Hiện Sinh" : "Phòng Phương Đông");
+            String title = "Phòng Triết Học";
             String html = getHeader(title) +
-                    "<div class='container'>" +
-                    "  <a href='/' class='back-btn'>⬅ Quay lại</a>" +
-                    "  <h1>" + title + "</h1>" +
-                    "  <div class='quote-card'><p class='quote'>\"" + w.quote + "\"</p><p class='author'>— " + w.author
+                    "<div class='container'><a href='/' class='back-btn'>⬅ Quay lại</a><h1>" + title + "</h1>" +
+                    "<div class='quote-card'><p class='quote'>\"" + w.quote + "\"</p><p class='author'>— " + w.author
                     + "</p></div>" +
-                    "  <button onclick='window.location.reload()' class='btn-reload'>✨ Câu khác</button>" +
-                    "</div>" + getFooter();
+                    "<button onclick='window.location.reload()' class='btn-reload'>✨ Câu khác</button></div>"
+                    + getFooter();
             sendResponse(t, html);
         }
     }
@@ -244,20 +271,43 @@ public class Main {
     }
 
     private static void initData() {
-        schools.put("stoic", Arrays.asList(new Wisdom("Chúng ta khổ sở trong tưởng tượng nhiều hơn thực tế.", "Seneca"),
-                new Wisdom("Không gì làm hại bạn nếu bạn không cho phép.", "Marcus Aurelius")));
-        schools.put("exist", Arrays.asList(new Wisdom("Con người bị kết án phải tự do.", "Sartre"),
-                new Wisdom("Ta phải tưởng tượng Sisyphus hạnh phúc.", "Camus")));
-        schools.put("eastern", Arrays.asList(new Wisdom("Biết người là trí, biết mình là sáng.", "Lão Tử"),
-                new Wisdom("Đời là bể khổ, quay đầu là bờ.", "Phật Giáo")));
+        // 1. Trường phái Khắc Kỷ (Stoicism) - Rèn luyện tâm trí vững vàng
+        schools.put("stoic", Arrays.asList(
+                new Wisdom("Chúng ta khổ sở trong tưởng tượng nhiều hơn thực tế.", "Seneca"),
+                new Wisdom("Không gì làm hại bạn nếu bạn không cho phép.", "Marcus Aurelius"),
+                new Wisdom("Cách trả thù tốt nhất là đừng trở nên giống kẻ thù của mình.", "Marcus Aurelius"),
+                new Wisdom("Không phải sự việc làm ta rối trí, mà là cách ta nhìn nhận nó.", "Epictetus"),
+                new Wisdom("Hạnh phúc của đời bạn phụ thuộc vào chất lượng những suy nghĩ của bạn.", "Marcus Aurelius"),
+                new Wisdom("Hãy sống mỗi ngày như thể đó là ngày cuối cùng của đời bạn.", "Seneca")));
+
+        // 2. Trường phái Hiện Sinh (Existentialism) - Tự do và Ý nghĩa
+        schools.put("exist", Arrays.asList(
+                new Wisdom("Con người bị kết án phải tự do.", "Sartre"),
+                new Wisdom("Ta phải tưởng tượng Sisyphus hạnh phúc.", "Camus"),
+                new Wisdom("Người có lý do để sống có thể chịu đựng bất kỳ nghịch cảnh nào.", "Nietzsche"),
+                new Wisdom("Địa ngục chính là người khác.", "Sartre"),
+                new Wisdom("Giữa mùa đông khắc nghiệt, tôi nhận ra trong mình có một mùa hè bất diệt.", "Camus"),
+                new Wisdom("Cuộc đời chỉ có thể được hiểu khi nhìn lại, nhưng phải được sống khi nhìn về phía trước.",
+                        "Kierkegaard")));
+
+        // 3. Triết học Phương Đông (Eastern) - An nhiên và Tỉnh thức
+        schools.put("eastern", Arrays.asList(
+                new Wisdom("Biết người là trí, biết mình là sáng.", "Lão Tử"),
+                new Wisdom("Đời là bể khổ, quay đầu là bờ.", "Phật Giáo"),
+                new Wisdom("Hành trình vạn dặm bắt đầu từ một bước chân.", "Lão Tử"),
+                new Wisdom("Tâm bất biến giữa dòng đời vạn biến.", "Thích Nhất Hạnh"),
+                new Wisdom("Không quan trọng việc bạn đi chậm thế nào, miễn là đừng bao giờ dừng lại.", "Khổng Tử"),
+                new Wisdom("Quá khứ đã qua, tương lai chưa tới, chỉ có khoảnh khắc hiện tại là thực.",
+                        "Thích Ca Mâu Ni")));
     }
 
     private static String getHeader(String title) {
         return "<!DOCTYPE html><html lang='vi'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>"
                 + title + "</title>" +
-                "<style>@import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,700;1,300&family=Montserrat:wght@400;600&display=swap');"
+                "<style>" +
+                "@import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,700;1,300&family=Montserrat:wght@400;600&display=swap');"
                 +
-                ":root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --gold: #fbbf24; --red: #ef4444; }" +
+                ":root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --gold: #fbbf24; }" +
                 "body { background-color: var(--bg); color: var(--text); font-family: 'Montserrat', sans-serif; margin: 0; padding: 20px; line-height: 1.6; }"
                 +
                 ".container { max-width: 600px; margin: 0 auto; text-align: center; }" +
@@ -267,16 +317,24 @@ public class Main {
                 +
                 ".choice:hover { border-color: var(--gold); transform: translateY(-2px); }" +
                 ".wall { text-align: left; margin-top: 20px; }" +
-                ".wall-msg { background: rgba(255,255,255,0.05); padding: 15px; margin-bottom: 15px; border-radius: 10px; border-left: 3px solid var(--gold); }"
+                ".wall-msg { background: rgba(255,255,255,0.05); padding: 15px; margin-bottom: 15px; border-radius: 10px; border-left: 3px solid var(--gold); transition: all 0.5s ease; }"
                 +
                 ".msg-content { font-family: 'Merriweather', serif; margin-bottom: 10px; font-size: 1.1em; }" +
                 ".msg-actions { display: flex; gap: 10px; align-items: center; }" +
+
+                /* Nút Like & Dislike & Hide */
                 ".btn-like { background: none; border: 1px solid #ef4444; color: #ef4444; padding: 5px 12px; border-radius: 15px; cursor: pointer; transition: 0.2s; }"
                 +
                 ".btn-like:hover { background: #ef4444; color: white; }" +
-                ".btn-hide { background: none; border: 1px solid #94a3b8; color: #94a3b8; padding: 5px 12px; border-radius: 15px; cursor: pointer; }"
+
+                ".btn-dislike { background: none; border: 1px solid #64748b; color: #94a3b8; padding: 5px 12px; border-radius: 15px; cursor: pointer; transition: 0.2s; }"
                 +
-                ".btn-hide:hover { background: #94a3b8; color: #0f172a; }" +
+                ".btn-dislike:hover { border-color: #cbd5e1; color: #fff; }" +
+
+                ".btn-hide { background: none; border: none; color: #475569; padding: 5px 12px; cursor: pointer; font-size: 0.9em; }"
+                +
+                ".btn-hide:hover { color: #94a3b8; }" +
+
                 ".post-form { display: flex; gap: 10px; margin-bottom: 20px; }" +
                 ".post-form input { flex: 1; padding: 12px; border-radius: 20px; border: none; background: #334155; color: white; outline: none; }"
                 +
@@ -289,12 +347,20 @@ public class Main {
                 ".btn-reload { padding: 10px 20px; background: var(--gold); border: none; border-radius: 20px; font-weight: bold; cursor: pointer; }"
                 +
                 ".back-btn { display: inline-block; margin-bottom: 15px; color: #38bdf8; text-decoration: none; }" +
-                "<script>function hidePost(id){var e=document.getElementById('post-'+id);if(e){e.style.opacity='0';setTimeout(function(){e.style.display='none';},500);}}</script>"
-                +
-                "</style></head><body>";
+
+                "<script>" +
+                "function hidePost(id) {" +
+                "   var element = document.getElementById('post-' + id);" +
+                "   if(element) {" +
+                "       element.style.opacity = '0';" +
+                "       element.style.transform = 'translateX(20px)';" +
+                "       setTimeout(function(){ element.style.display = 'none'; }, 500);" +
+                "   }" +
+                "}" +
+                "</script></head><body>";
     }
 
     private static String getFooter() {
-        return "<br><br><p style='text-align:center; color:#475569; font-size:0.8rem'>Java Agora v3.0 (Persistent)</p></body></html>";
+        return "<br><br><p style='text-align:center; color:#475569; font-size:0.8rem'>He he he</p></body></html>";
     }
 }
