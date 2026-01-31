@@ -322,7 +322,7 @@ public class Main {
                 ".msg-content { font-family: 'Merriweather', serif; margin-bottom: 10px; font-size: 1.1em; }" +
                 ".msg-actions { display: flex; gap: 10px; align-items: center; }" +
 
-                /* Nút Like & Dislike & Hide */
+                /* CSS cho nút bấm */
                 ".btn-like { background: none; border: 1px solid #ef4444; color: #ef4444; padding: 5px 12px; border-radius: 15px; cursor: pointer; transition: 0.2s; }"
                 +
                 ".btn-like:hover { background: #ef4444; color: white; }" +
@@ -348,14 +348,32 @@ public class Main {
                 +
                 ".back-btn { display: inline-block; margin-bottom: 15px; color: #38bdf8; text-decoration: none; }" +
 
+                "</style>" +
                 "<script>" +
-                "function hidePost(id) {" +
-                "   var element = document.getElementById('post-' + id);" +
-                "   if(element) {" +
-                "       element.style.opacity = '0';" +
-                "       element.style.transform = 'translateX(20px)';" +
-                "       setTimeout(function(){ element.style.display = 'none'; }, 500);" +
-                "   }" +
+                "// 1. Khi trang web tải xong, kiểm tra danh sách đen\n" +
+                "document.addEventListener('DOMContentLoaded', function() {\n" +
+                "   var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');\n" +
+                "   hiddenList.forEach(function(id) {\n" +
+                "       var el = document.getElementById('post-' + id);\n" +
+                "       if(el) el.style.display = 'none';\n" + // Ẩn ngay lập tức
+                "   });\n" +
+                "});\n" +
+                "\n" +
+                "// 2. Hàm ẩn bài viết cập nhật mới\n" +
+                "function hidePost(id) {\n" +
+                "   var element = document.getElementById('post-' + id);\n" +
+                "   if(element) {\n" +
+                "       // Hiệu ứng mờ dần cho đẹp\n" +
+                "       element.style.opacity = '0';\n" +
+                "       setTimeout(function(){ element.style.display = 'none'; }, 500);\n" +
+                "       \n" +
+                "       // Lưu ID bài viết vào bộ nhớ trình duyệt\n" +
+                "       var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');\n" +
+                "       if (!hiddenList.includes(id)) {\n" +
+                "           hiddenList.push(id);\n" +
+                "           localStorage.setItem('hidden_posts', JSON.stringify(hiddenList));\n" +
+                "       }\n" +
+                "   }\n" +
                 "}" +
                 "</script></head><body>";
     }
