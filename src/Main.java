@@ -275,6 +275,9 @@ public class Main {
         schools.put("stoic", Arrays.asList(
                 new Wisdom("Chúng ta khổ sở trong tưởng tượng nhiều hơn thực tế.", "Seneca"),
                 new Wisdom("Không gì làm hại bạn nếu bạn không cho phép.", "Marcus Aurelius"),
+                new Wisdom("Hãy tập trung vào những gì bạn có thể kiểm soát.", "Epictetus"),
+                new Wisdom("Người nghèo không phải là người có ít, mà là người khao khát nhiều hơn.", "Seneca"),
+                new Wisdom("Đừng mong mọi chuyện xảy ra theo ý mình, hãy mong nó xảy ra như nó vốn có.", "Epictetus"),
                 new Wisdom("Cách trả thù tốt nhất là đừng trở nên giống kẻ thù của mình.", "Marcus Aurelius"),
                 new Wisdom("Không phải sự việc làm ta rối trí, mà là cách ta nhìn nhận nó.", "Epictetus"),
                 new Wisdom("Hạnh phúc của đời bạn phụ thuộc vào chất lượng những suy nghĩ của bạn.", "Marcus Aurelius"),
@@ -282,20 +285,28 @@ public class Main {
 
         // 2. Trường phái Hiện Sinh (Existentialism) - Tự do và Ý nghĩa
         schools.put("exist", Arrays.asList(
-                new Wisdom("Con người bị kết án phải tự do.", "Sartre"),
-                new Wisdom("Ta phải tưởng tượng Sisyphus hạnh phúc.", "Camus"),
-                new Wisdom("Người có lý do để sống có thể chịu đựng bất kỳ nghịch cảnh nào.", "Nietzsche"),
-                new Wisdom("Địa ngục chính là người khác.", "Sartre"),
-                new Wisdom("Giữa mùa đông khắc nghiệt, tôi nhận ra trong mình có một mùa hè bất diệt.", "Camus"),
+                new Wisdom("Con người bị kết án phải tự do.", "Jean-Paul Sartre"),
+                new Wisdom("Phải tưởng tượng Sisyphus hạnh phúc.", "Albert Camus"),
+                new Wisdom("Người có lý do để sống có thể chịu đựng bất kỳ nghịch cảnh nào.", "Friedrich Nietzsche"),
+                new Wisdom("Địa ngục chính là người khác.", "Jean-Paul Sartre"),
+                new Wisdom("Giữa mùa đông khắc nghiệt, tôi nhận ra trong mình có một mùa hè bất diệt.", "Albert Camus"),
                 new Wisdom("Cuộc đời chỉ có thể được hiểu khi nhìn lại, nhưng phải được sống khi nhìn về phía trước.",
-                        "Kierkegaard")));
+                        "Søren Kierkegaard"),
+                new Wisdom("Mọi thứ đều có thể bị tước đoạt... trừ một thứ: quyền lựa chọn thái độ.", "Viktor Frankl"),
+                new Wisdom("Lo âu là sự chóng mặt của tự do.", "Søren Kierkegaard")));
 
         // 3. Triết học Phương Đông (Eastern) - An nhiên và Tỉnh thức
         schools.put("eastern", Arrays.asList(
-                new Wisdom("Biết người là trí, biết mình là sáng.", "Lão Tử"),
-                new Wisdom("Đời là bể khổ, quay đầu là bờ.", "Phật Giáo"),
+                new Wisdom("Biết người là trí, biết mình là sáng.", "Lão Tử"), // Đạo Đức Kinh
+                new Wisdom("Đời là bể khổ, quay đầu là bờ.", "Phật Giáo"), // Tứ diệu đế
                 new Wisdom("Hành trình vạn dặm bắt đầu từ một bước chân.", "Lão Tử"),
-                new Wisdom("Tâm bất biến giữa dòng đời vạn biến.", "Thích Nhất Hạnh"),
+                new Wisdom("Sống chậm lại để cảm nhận sâu hơn.", "Khuyết danh"), // Câu này mang tính hiện đại
+                                                                                 // (Lifestyle), không thuộc kinh điển
+                                                                                 // Thiền tông
+                new Wisdom("Hãy để tâm hồn bạn như mặt hồ yên tĩnh, phản chiếu mọi sự vật mà không bị dao động.",
+                        "Tục ngữ Thiền"), // Hoặc "Zen Proverb"
+                new Wisdom("Dĩ bất biến, ứng vạn biến.", "Hồ Chí Minh"), // Sửa lại cho đúng lịch sử (hoặc để "Triết lý
+                                                                         // Đạo gia")
                 new Wisdom("Không quan trọng việc bạn đi chậm thế nào, miễn là đừng bao giờ dừng lại.", "Khổng Tử"),
                 new Wisdom("Quá khứ đã qua, tương lai chưa tới, chỉ có khoảnh khắc hiện tại là thực.",
                         "Thích Ca Mâu Ni")));
