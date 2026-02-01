@@ -1,14 +1,14 @@
-# Sử dụng Java 17 (bản nhẹ)
-FROM openjdk:17-jdk-slim
+# Sử dụng Java 17 bản chuẩn (Eclipse Temurin)
+FROM eclipse-temurin:17-jdk-alpine
 
-# Tạo thư mục làm việc
+# Copy toàn bộ code vào thư mục /app
+COPY . /app
+
+# Đặt thư mục làm việc
 WORKDIR /app
 
-# Copy tất cả code của bạn vào trong
-COPY . .
-
-# Biên dịch file Java
+# Biên dịch file code
 RUN javac Main.java
 
-# Chạy Server
+# Chạy file code
 CMD ["java", "Main"]
