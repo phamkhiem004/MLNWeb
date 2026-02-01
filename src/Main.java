@@ -363,7 +363,8 @@ public class Main {
                 "<script>" +
 
                 // --- DANH SÁCH TỪ CẤM (Sửa ở đây) ---
-                "var BAD_WORDS = ['ngu', 'chó', 'chết', 'bậy', 'tục', 'điên', 'buồi', 'cặc', 'lồn','giết'];\n" +
+                "var BAD_WORDS = ['ngu', 'chó', 'chết', 'bậy', 'tục', 'điên', 'buồi', 'cặc', 'lồn','giết', 'buoi', 'cac','lon', 'giet','súc vật'];\n"
+                +
 
                 // 1. Hàm kiểm duyệt trước khi gửi
                 "function checkContent(event) {\n" +
