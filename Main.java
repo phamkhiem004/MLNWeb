@@ -7,7 +7,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap; // <--- MỚI: Dùng để lưu danh sách bị Ban an toàn
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Main {
 
@@ -41,27 +41,26 @@ public class Main {
         }
     }
 
-    // --- CÁC BIẾN TOÀN CỤC ---
+    // --- BIẾN TOÀN CỤC ---
     private static final String DB_FILE = "minidb.txt";
     private static List<Post> communityPosts = new ArrayList<>();
     private static int postIdCounter = 1;
     private static Map<String, List<Wisdom>> schools = new HashMap<>();
 
-    // --- PHẦN MỚI: CẤU HÌNH BAN (CẤM) ---
-    // 1. Danh sách từ cấm (Copy từ JS của bạn vào đây để Server xử lý)
+    // --- CẤU HÌNH BAN ---
     private static final String[] BAD_WORDS = {
             "ngu", "chó", "chết", "bậy", "tục", "điên",
             "buồi", "cặc", "lồn", "giết", "buoi", "cac",
             "lon", "giet", "súc vật", "dm", "đm", "vkl"
     };
-
-    // 2. Sổ đen ghi IP: Map<IP, Thời gian được thả>
+    // Sổ đen: Map<IP, Thời gian được thả (timestamp)>
     private static final Map<String, Long> bannedIps = new ConcurrentHashMap<>();
-
-    // 3. Thời gian phạt: 5 phút (300,000 mili giây)
-    private static final long BAN_DURATION = 5 * 60 * 1000;
+    private static final long BAN_DURATION = 5 * 60 * 1000; // 5 phút
 
     public static void main(String[] args) throws IOException {
+        // Fix lỗi hiển thị tiếng Việt trên Console
+        System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
+
         initData();
         loadPostsFromFile();
 
@@ -74,6 +73,7 @@ public class Main {
 
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
 
+        // Gắn Handler cho các đường dẫn
         server.createContext("/", new HomeHandler());
         server.createContext("/room", new RoomHandler());
         server.createContext("/post", new PostHandler());
@@ -85,19 +85,58 @@ public class Main {
         System.out.println("Server đã chạy thành công!");
     }
 
-    // --- HÀM MỚI: LẤY IP THẬT TỪ RENDER ---
+    // --- HÀM HỖ TRỢ LẤY IP ---
     private static String getClientIP(HttpExchange t) {
-        // Render đặt IP thật của người dùng trong header này
         String ip = t.getRequestHeaders().getFirst("X-Forwarded-For");
-
         if (ip == null || ip.isEmpty()) {
-            return t.getRemoteAddress().getAddress().getHostAddress(); // Chạy localhost
+            return t.getRemoteAddress().getAddress().getHostAddress();
         }
-        // Nếu có nhiều IP (do qua nhiều proxy), lấy cái đầu tiên
         return ip.split(",")[0].trim();
     }
 
-    // --- 1. XỬ LÝ DATABASE ---
+    // --- 🛑 HÀM KIỂM TRA BAN (QUAN TRỌNG NHẤT) ---
+    // Trả về true nếu bị ban (để code dừng lại), false nếu sạch
+    private static boolean checkGlobalBan(HttpExchange t) throws IOException {
+        String userIP = getClientIP(t);
+        long currentTime = System.currentTimeMillis();
+
+        if (bannedIps.containsKey(userIP)) {
+            long releaseTime = bannedIps.get(userIP);
+
+            if (currentTime < releaseTime) {
+                // VẪN ĐANG BỊ PHẠT -> HIỆN MÀN HÌNH ĐẾM NGƯỢC
+                long secondsLeft = (releaseTime - currentTime) / 1000;
+
+                String errorHtml = "<!DOCTYPE html><html lang='vi'><head><meta charset='UTF-8'>" +
+                        "<meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Bị chặn</title>" +
+                        "<style>body{background:#0f172a;color:#ef4444;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
+                        +
+                        ".box{text-align:center;background:#1e293b;padding:40px;border-radius:15px;border:1px solid #ef4444;max-width:90%;}"
+                        +
+                        ".timer{font-size:3em;font-weight:bold;color:#fbbf24;margin:20px 0;}</style></head><body>" +
+                        "<div class='box'><h1>🚫 TRUY CẬP BỊ TỪ CHỐI</h1>" +
+                        "<p>IP của bạn đã bị khóa do vi phạm tiêu chuẩn cộng đồng.</p>" +
+                        "<p>Vui lòng chờ:</p><div class='timer' id='countdown'>" + secondsLeft
+                        + "</div><p>giây nữa để quay lại.</p></div>" +
+                        "<script>var seconds=" + secondsLeft + ";var display=document.getElementById('countdown');" +
+                        "var timer=setInterval(function(){seconds--;display.textContent=seconds;" +
+                        "if(seconds<=0){clearInterval(timer);window.location.reload();}},1000);</script></body></html>";
+
+                t.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+                t.sendResponseHeaders(403, errorHtml.getBytes(StandardCharsets.UTF_8).length);
+                OutputStream os = t.getResponseBody();
+                os.write(errorHtml.getBytes(StandardCharsets.UTF_8));
+                os.close();
+                return true; // Đã xử lý chặn
+            } else {
+                // Hết hạn phạt -> Xóa án tích ngay lập tức
+                bannedIps.remove(userIP);
+            }
+        }
+        return false; // Không bị ban, cho đi tiếp
+    }
+
+    // --- DATABASE ---
     private static void savePostsToFile() {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(DB_FILE))) {
             for (Post p : communityPosts) {
@@ -105,7 +144,7 @@ public class Main {
                 writer.newLine();
             }
         } catch (IOException e) {
-            System.out.println("Lỗi lưu file");
+            e.printStackTrace();
         }
     }
 
@@ -113,7 +152,6 @@ public class Main {
         File file = new File(DB_FILE);
         if (!file.exists())
             return;
-
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
             communityPosts.clear();
@@ -125,7 +163,6 @@ public class Main {
                     int likes = Integer.parseInt(parts[1]);
                     int dislikes = (parts.length == 4) ? Integer.parseInt(parts[2]) : 0;
                     String content = (parts.length == 4) ? parts[3] : parts[2];
-
                     communityPosts.add(new Post(id, content, likes, dislikes));
                     if (id > maxId)
                         maxId = id;
@@ -133,24 +170,25 @@ public class Main {
             }
             postIdCounter = maxId + 1;
         } catch (Exception e) {
-            System.out.println("Lỗi đọc file: " + e.getMessage());
         }
     }
 
-    // --- 2. XỬ LÝ HANDLERS ---
+    // --- HANDLERS (TẤT CẢ ĐỀU PHẢI CHECK BAN ĐẦU TIÊN) ---
 
-    // Xử lý Like
     static class LikeHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
+            if (checkGlobalBan(t))
+                return; // 🛑 CHẶN
             handleReaction(t, true);
         }
     }
 
-    // Xử lý Dislike
     static class DislikeHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
+            if (checkGlobalBan(t))
+                return; // 🛑 CHẶN
             handleReaction(t, false);
         }
     }
@@ -178,79 +216,12 @@ public class Main {
         redirectHome(t);
     }
 
-    // --- HANDLER CHÍNH: ĐĂNG BÀI (ĐÃ THÊM LOGIC BAN IP) ---
-    static class PostHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange t) throws IOException {
-            if ("POST".equals(t.getRequestMethod())) {
-                String userIP = getClientIP(t);
-                long currentTime = System.currentTimeMillis();
-
-                // --- BƯỚC 1: KIỂM TRA SỔ ĐEN ---
-                if (bannedIps.containsKey(userIP)) {
-                    long releaseTime = bannedIps.get(userIP);
-                    if (currentTime < releaseTime) {
-                        // Vẫn chưa hết hạn phạt -> CHẶN
-                        long secondsLeft = (releaseTime - currentTime) / 1000;
-                        String errorMsg = "🚫 BAN IP: Bạn bị cấm chat do ngôn từ không phù hợp! Quay lại sau "
-                                + secondsLeft + " giây.";
-                        t.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
-                        t.sendResponseHeaders(403, errorMsg.getBytes(StandardCharsets.UTF_8).length);
-                        OutputStream os = t.getResponseBody();
-                        os.write(errorMsg.getBytes(StandardCharsets.UTF_8));
-                        os.close();
-                        return; // Dừng ngay, không cho đi tiếp
-                    } else {
-                        // Hết hạn -> Xóa tên khỏi sổ đen
-                        bannedIps.remove(userIP);
-                    }
-                }
-
-                // --- BƯỚC 2: XỬ LÝ NỘI DUNG ---
-                String body = getRequestBody(t);
-                if (body.startsWith("thought=")) {
-                    String raw = body.split("thought=")[1];
-                    String content = URLDecoder.decode(raw, StandardCharsets.UTF_8.name());
-
-                    // --- BƯỚC 3: KIỂM TRA TỪ CẤM ---
-                    boolean isBad = false;
-                    for (String badWord : BAD_WORDS) {
-                        if (content.toLowerCase().contains(badWord)) {
-                            isBad = true;
-                            break;
-                        }
-                    }
-
-                    if (isBad) {
-                        // PHÁT HIỆN TỪ CẤM -> BAN NGAY LẬP TỨC
-                        bannedIps.put(userIP, currentTime + BAN_DURATION);
-
-                        String banMsg = "😡 PHÁT HIỆN TỪ CẤM! IP của bạn đã bị khóa 5 phút.";
-                        t.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
-                        t.sendResponseHeaders(403, banMsg.getBytes(StandardCharsets.UTF_8).length);
-                        OutputStream os = t.getResponseBody();
-                        os.write(banMsg.getBytes(StandardCharsets.UTF_8));
-                        os.close();
-                        return; // Dừng, không lưu bài
-                    }
-
-                    // Nếu sạch sẽ -> Lưu bài
-                    // Encode lại HTML để chống XSS
-                    content = content.replace("<", "&lt;").replace(">", "&gt;");
-
-                    if (communityPosts.size() >= 50)
-                        communityPosts.remove(0);
-                    communityPosts.add(new Post(postIdCounter++, content, 0, 0));
-                    savePostsToFile();
-                }
-            }
-            redirectHome(t);
-        }
-    }
-
     static class HomeHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
+            if (checkGlobalBan(t))
+                return; // 🛑 CHẶN CỬA CHÍNH
+
             String html = getHeader("Sảnh Chính") +
                     "<div class='container'>" +
                     "  <h1>🏛️ CÁNH CỬA TRIẾT HỌC</h1>" +
@@ -278,7 +249,74 @@ public class Main {
         }
     }
 
-    // --- UI HELPERS ---
+    static class RoomHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            if (checkGlobalBan(t))
+                return; // 🛑 CHẶN CỬA PHÒNG
+
+            String query = t.getRequestURI().getQuery();
+            String type = (query != null && query.contains("type=")) ? query.split("type=")[1] : "stoic";
+            List<Wisdom> roomData = schools.getOrDefault(type, schools.get("stoic"));
+            Wisdom w = roomData.get(new Random().nextInt(roomData.size()));
+            String title = "Phòng Triết Học";
+            String html = getHeader(title) +
+                    "<div class='container'><a href='/' class='back-btn'>⬅ Quay lại</a><h1>" + title + "</h1>" +
+                    "<div class='quote-card'><p class='quote'>\"" + w.quote + "\"</p><p class='author'>— " + w.author
+                    + "</p></div>" +
+                    "<button onclick='window.location.reload()' class='btn-reload'>✨ Câu khác</button></div>"
+                    + getFooter();
+            sendResponse(t, html);
+        }
+    }
+
+    static class PostHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            // Bước 1: Check xem đã bị ban từ trước chưa?
+            if (checkGlobalBan(t))
+                return;
+
+            // Bước 2: Xử lý nội dung (Check tiếp từ bậy)
+            if ("POST".equals(t.getRequestMethod())) {
+                String body = getRequestBody(t);
+                String[] parts = body.split("thought="); // Fix lỗi crash nếu hack request
+
+                if (parts.length >= 2) {
+                    String raw = parts[1];
+                    String content = URLDecoder.decode(raw, StandardCharsets.UTF_8.name());
+                    String userIP = getClientIP(t);
+
+                    // Check từ cấm
+                    boolean isBad = false;
+                    for (String badWord : BAD_WORDS) {
+                        if (content.toLowerCase().contains(badWord)) {
+                            isBad = true;
+                            break;
+                        }
+                    }
+
+                    if (isBad) {
+                        // PHẠT: Ghi vào sổ đen
+                        bannedIps.put(userIP, System.currentTimeMillis() + BAN_DURATION);
+                        // Gọi lại checkGlobalBan để nó hiển thị thông báo lỗi đếm ngược ngay lập tức
+                        checkGlobalBan(t);
+                        return;
+                    }
+
+                    // Nếu sạch -> Lưu
+                    content = content.replace("<", "&lt;").replace(">", "&gt;");
+                    if (communityPosts.size() >= 50)
+                        communityPosts.remove(0);
+                    communityPosts.add(new Post(postIdCounter++, content, 0, 0));
+                    savePostsToFile();
+                }
+            }
+            redirectHome(t);
+        }
+    }
+
+    // --- UI HELPERS & UTILS (GIỮ NGUYÊN) ---
     private static String renderCommunityWall() {
         if (communityPosts.isEmpty())
             return "<p style='opacity:0.6; text-align:center'>Chưa có suy tư nào.</p>";
@@ -299,34 +337,16 @@ public class Main {
                     .append("    </form>")
                     .append("    <button type='button' onclick='hidePost(").append(p.id)
                     .append(")' class='btn-hide'>🙈 Ẩn</button>")
-                    .append("  </div>")
-                    .append("</div>");
+                    .append("  </div></div>");
         }
         return sb.toString();
-    }
-
-    static class RoomHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange t) throws IOException {
-            String query = t.getRequestURI().getQuery();
-            String type = (query != null && query.contains("type=")) ? query.split("type=")[1] : "stoic";
-            List<Wisdom> roomData = schools.getOrDefault(type, schools.get("stoic"));
-            Wisdom w = roomData.get(new Random().nextInt(roomData.size()));
-            String title = "Phòng Triết Học";
-            String html = getHeader(title) +
-                    "<div class='container'><a href='/' class='back-btn'>⬅ Quay lại</a><h1>" + title + "</h1>" +
-                    "<div class='quote-card'><p class='quote'>\"" + w.quote + "\"</p><p class='author'>— " + w.author
-                    + "</p></div>" +
-                    "<button onclick='window.location.reload()' class='btn-reload'>✨ Câu khác</button></div>"
-                    + getFooter();
-            sendResponse(t, html);
-        }
     }
 
     private static String getRequestBody(HttpExchange t) throws IOException {
         InputStreamReader isr = new InputStreamReader(t.getRequestBody(), StandardCharsets.UTF_8);
         BufferedReader br = new BufferedReader(isr);
-        return br.readLine();
+        String line = br.readLine();
+        return line != null ? line : "";
     }
 
     private static void redirectHome(HttpExchange t) throws IOException {
@@ -429,7 +449,6 @@ public class Main {
                 ".back-btn { display: inline-block; margin-bottom: 15px; color: #38bdf8; text-decoration: none; }" +
                 "</style>" +
                 "<script>" +
-                // Vẫn giữ script ẩn bài cũ
                 "document.addEventListener('DOMContentLoaded', function() {" +
                 "  var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');" +
                 "  hiddenList.forEach(function(id) {" +
@@ -453,6 +472,6 @@ public class Main {
     }
 
     private static String getFooter() {
-        return "<br><br><p style='text-align:center; color:#475569; font-size:0.8rem'>He he he</p></body></html>";
+        return "<br><br><p style='text-align:center; color:#475569; font-size:0.8rem'>From MLN Group 11 with love</p></body></html>";
     }
 }
