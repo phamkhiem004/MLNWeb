@@ -7,15 +7,16 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap; // <--- MỚI: Dùng để lưu danh sách bị Ban an toàn
 
 public class Main {
 
-    // --- CẤU TRÚC DỮ LIỆU CẬP NHẬT ---
+    // --- CẤU TRÚC DỮ LIỆU ---
     static class Post {
         int id;
         String content;
         int likes;
-        int dislikes; // <--- MỚI: Thêm biến đếm dislike
+        int dislikes;
 
         public Post(int id, String content, int likes, int dislikes) {
             this.id = id;
@@ -24,7 +25,6 @@ public class Main {
             this.dislikes = dislikes;
         }
 
-        // Lưu dạng: id|likes|dislikes|content
         public String toFileString() {
             String cleanContent = content.replace("\n", " ").replace("|", "-");
             return id + "|" + likes + "|" + dislikes + "|" + cleanContent;
@@ -41,28 +41,38 @@ public class Main {
         }
     }
 
+    // --- CÁC BIẾN TOÀN CỤC ---
     private static final String DB_FILE = "minidb.txt";
     private static List<Post> communityPosts = new ArrayList<>();
     private static int postIdCounter = 1;
     private static Map<String, List<Wisdom>> schools = new HashMap<>();
 
+    // --- PHẦN MỚI: CẤU HÌNH BAN (CẤM) ---
+    // 1. Danh sách từ cấm (Copy từ JS của bạn vào đây để Server xử lý)
+    private static final String[] BAD_WORDS = {
+            "ngu", "chó", "chết", "bậy", "tục", "điên",
+            "buồi", "cặc", "lồn", "giết", "buoi", "cac",
+            "lon", "giet", "súc vật", "dm", "đm", "vkl"
+    };
+
+    // 2. Sổ đen ghi IP: Map<IP, Thời gian được thả>
+    private static final Map<String, Long> bannedIps = new ConcurrentHashMap<>();
+
+    // 3. Thời gian phạt: 5 phút (300,000 mili giây)
+    private static final long BAN_DURATION = 5 * 60 * 1000;
+
     public static void main(String[] args) throws IOException {
         initData();
-        loadPostsFromFile(); // Nạp dữ liệu cũ
+        loadPostsFromFile();
 
-        // --- SỬA ĐỔI QUAN TRỌNG CHO RENDER ---
-        // Mặc định là 8080 (để chạy thử trên máy bạn)
         int port = 8080;
-        // Nếu Server (Render) cấp cổng qua biến môi trường PORT, thì dùng cổng đó
         if (System.getenv("PORT") != null) {
             port = Integer.parseInt(System.getenv("PORT"));
         }
 
         System.out.println("Server đang khởi động tại cổng: " + port);
 
-        // Lưu ý: "0.0.0.0" là bắt buộc để Render có thể truy cập được từ bên ngoài
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
-        // -------------------------------------
 
         server.createContext("/", new HomeHandler());
         server.createContext("/room", new RoomHandler());
@@ -75,7 +85,19 @@ public class Main {
         System.out.println("Server đã chạy thành công!");
     }
 
-    // --- 1. XỬ LÝ DATABASE (CẬP NHẬT ĐỂ ĐỌC ĐƯỢC DISLIKE) ---
+    // --- HÀM MỚI: LẤY IP THẬT TỪ RENDER ---
+    private static String getClientIP(HttpExchange t) {
+        // Render đặt IP thật của người dùng trong header này
+        String ip = t.getRequestHeaders().getFirst("X-Forwarded-For");
+
+        if (ip == null || ip.isEmpty()) {
+            return t.getRemoteAddress().getAddress().getHostAddress(); // Chạy localhost
+        }
+        // Nếu có nhiều IP (do qua nhiều proxy), lấy cái đầu tiên
+        return ip.split(",")[0].trim();
+    }
+
+    // --- 1. XỬ LÝ DATABASE ---
     private static void savePostsToFile() {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(DB_FILE))) {
             for (Post p : communityPosts) {
@@ -97,13 +119,10 @@ public class Main {
             communityPosts.clear();
             int maxId = 0;
             while ((line = reader.readLine()) != null) {
-                // Cố gắng tách thành 4 phần: id|likes|dislikes|content
                 String[] parts = line.split("\\|", 4);
-
                 if (parts.length >= 3) {
                     int id = Integer.parseInt(parts[0]);
                     int likes = Integer.parseInt(parts[1]);
-                    // Logic tương thích ngược: Nếu file cũ chưa có dislike thì mặc định là 0
                     int dislikes = (parts.length == 4) ? Integer.parseInt(parts[2]) : 0;
                     String content = (parts.length == 4) ? parts[3] : parts[2];
 
@@ -114,7 +133,7 @@ public class Main {
             }
             postIdCounter = maxId + 1;
         } catch (Exception e) {
-            System.out.println("Lỗi đọc file (có thể do định dạng cũ): " + e.getMessage());
+            System.out.println("Lỗi đọc file: " + e.getMessage());
         }
     }
 
@@ -128,7 +147,7 @@ public class Main {
         }
     }
 
-    // Xử lý Dislike (MỚI)
+    // Xử lý Dislike
     static class DislikeHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
@@ -136,7 +155,6 @@ public class Main {
         }
     }
 
-    // Hàm chung để xử lý Like/Dislike cho gọn code
     private static void handleReaction(HttpExchange t, boolean isLike) throws IOException {
         if ("POST".equals(t.getRequestMethod())) {
             String body = getRequestBody(t);
@@ -149,7 +167,7 @@ public class Main {
                                 p.likes++;
                             else
                                 p.dislikes++;
-                            savePostsToFile(); // Lưu ngay
+                            savePostsToFile();
                             break;
                         }
                     }
@@ -158,6 +176,76 @@ public class Main {
             }
         }
         redirectHome(t);
+    }
+
+    // --- HANDLER CHÍNH: ĐĂNG BÀI (ĐÃ THÊM LOGIC BAN IP) ---
+    static class PostHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            if ("POST".equals(t.getRequestMethod())) {
+                String userIP = getClientIP(t);
+                long currentTime = System.currentTimeMillis();
+
+                // --- BƯỚC 1: KIỂM TRA SỔ ĐEN ---
+                if (bannedIps.containsKey(userIP)) {
+                    long releaseTime = bannedIps.get(userIP);
+                    if (currentTime < releaseTime) {
+                        // Vẫn chưa hết hạn phạt -> CHẶN
+                        long secondsLeft = (releaseTime - currentTime) / 1000;
+                        String errorMsg = "🚫 BAN IP: Bạn bị cấm chat do ngôn từ không phù hợp! Quay lại sau "
+                                + secondsLeft + " giây.";
+                        t.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+                        t.sendResponseHeaders(403, errorMsg.getBytes(StandardCharsets.UTF_8).length);
+                        OutputStream os = t.getResponseBody();
+                        os.write(errorMsg.getBytes(StandardCharsets.UTF_8));
+                        os.close();
+                        return; // Dừng ngay, không cho đi tiếp
+                    } else {
+                        // Hết hạn -> Xóa tên khỏi sổ đen
+                        bannedIps.remove(userIP);
+                    }
+                }
+
+                // --- BƯỚC 2: XỬ LÝ NỘI DUNG ---
+                String body = getRequestBody(t);
+                if (body.startsWith("thought=")) {
+                    String raw = body.split("thought=")[1];
+                    String content = URLDecoder.decode(raw, StandardCharsets.UTF_8.name());
+
+                    // --- BƯỚC 3: KIỂM TRA TỪ CẤM ---
+                    boolean isBad = false;
+                    for (String badWord : BAD_WORDS) {
+                        if (content.toLowerCase().contains(badWord)) {
+                            isBad = true;
+                            break;
+                        }
+                    }
+
+                    if (isBad) {
+                        // PHÁT HIỆN TỪ CẤM -> BAN NGAY LẬP TỨC
+                        bannedIps.put(userIP, currentTime + BAN_DURATION);
+
+                        String banMsg = "😡 PHÁT HIỆN TỪ CẤM! IP của bạn đã bị khóa 5 phút.";
+                        t.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+                        t.sendResponseHeaders(403, banMsg.getBytes(StandardCharsets.UTF_8).length);
+                        OutputStream os = t.getResponseBody();
+                        os.write(banMsg.getBytes(StandardCharsets.UTF_8));
+                        os.close();
+                        return; // Dừng, không lưu bài
+                    }
+
+                    // Nếu sạch sẽ -> Lưu bài
+                    // Encode lại HTML để chống XSS
+                    content = content.replace("<", "&lt;").replace(">", "&gt;");
+
+                    if (communityPosts.size() >= 50)
+                        communityPosts.remove(0);
+                    communityPosts.add(new Post(postIdCounter++, content, 0, 0));
+                    savePostsToFile();
+                }
+            }
+            redirectHome(t);
+        }
     }
 
     static class HomeHandler implements HttpHandler {
@@ -176,7 +264,8 @@ public class Main {
                     "  <h2>📜 Bức Tường Cộng Đồng</h2>" +
                     "  <div class='post-input-area'>" +
                     "     <form action='/post' method='post' class='post-form'>" +
-                    "       <input type='text' name='thought' placeholder='Bạn đang suy ngẫm điều gì?' required>" +
+                    "       <input type='text' name='thought' placeholder='Bạn đang suy ngẫm điều gì?' required autocomplete='off'>"
+                    +
                     "       <button type='submit'>Khắc lên tường</button>" +
                     "     </form>" +
                     "  </div>" +
@@ -189,28 +278,7 @@ public class Main {
         }
     }
 
-    static class PostHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange t) throws IOException {
-            if ("POST".equals(t.getRequestMethod())) {
-                String body = getRequestBody(t);
-                if (body.startsWith("thought=")) {
-                    String raw = body.split("thought=")[1];
-                    String content = URLDecoder.decode(raw, StandardCharsets.UTF_8.name())
-                            .replace("<", "&lt;") // Biến dấu < thành ký tự an toàn
-                            .replace(">", "&gt;"); // Biến dấu > thành ký tự an toàn
-                    if (communityPosts.size() >= 50)
-                        communityPosts.remove(0);
-                    // Tạo bài mới: likes=0, dislikes=0
-                    communityPosts.add(new Post(postIdCounter++, content, 0, 0));
-                    savePostsToFile();
-                }
-            }
-            redirectHome(t);
-        }
-    }
-
-    // --- 3. UI CẬP NHẬT (THÊM NÚT DISLIKE) ---
+    // --- UI HELPERS ---
     private static String renderCommunityWall() {
         if (communityPosts.isEmpty())
             return "<p style='opacity:0.6; text-align:center'>Chưa có suy tư nào.</p>";
@@ -220,21 +288,15 @@ public class Main {
             sb.append("<div class='wall-msg' id='post-").append(p.id).append("'>")
                     .append("  <div class='msg-content'>❝ ").append(p.content).append(" ❞</div>")
                     .append("  <div class='msg-actions'>")
-
-                    // Nút Like
                     .append("    <form action='/like' method='post' style='display:inline'>")
                     .append("      <input type='hidden' name='id' value='").append(p.id).append("'>")
                     .append("      <button type='submit' class='btn-like'>❤️ ").append(p.likes).append("</button>")
                     .append("    </form>")
-
-                    // Nút Dislike (MỚI)
                     .append("    <form action='/dislike' method='post' style='display:inline'>")
                     .append("      <input type='hidden' name='id' value='").append(p.id).append("'>")
                     .append("      <button type='submit' class='btn-dislike'>💔 ").append(p.dislikes)
                     .append("</button>")
                     .append("    </form>")
-
-                    // Nút Ẩn (Sửa lỗi reload trang)
                     .append("    <button type='button' onclick='hidePost(").append(p.id)
                     .append(")' class='btn-hide'>🙈 Ẩn</button>")
                     .append("  </div>")
@@ -243,7 +305,6 @@ public class Main {
         return sb.toString();
     }
 
-    // --- CÁC HÀM CŨ GIỮ NGUYÊN HOẶC CHỈNH SỬA NHỎ ---
     static class RoomHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
@@ -264,7 +325,8 @@ public class Main {
 
     private static String getRequestBody(HttpExchange t) throws IOException {
         InputStreamReader isr = new InputStreamReader(t.getRequestBody(), StandardCharsets.UTF_8);
-        return new BufferedReader(isr).readLine();
+        BufferedReader br = new BufferedReader(isr);
+        return br.readLine();
     }
 
     private static void redirectHome(HttpExchange t) throws IOException {
@@ -341,22 +403,18 @@ public class Main {
                 ".wall { text-align: left; margin-top: 20px; }" +
                 ".wall-msg { background: rgba(255,255,255,0.05); padding: 15px; margin-bottom: 15px; border-radius: 10px; border-left: 3px solid var(--gold); transition: all 0.5s ease; }"
                 +
-                ".msg-content { font-family: 'Merriweather', serif; margin-bottom: 10px; font-size: 1.1em; }" +
+                ".msg-content { font-family: 'Merriweather', serif; margin-bottom: 10px; font-size: 1.1em; word-wrap: break-word; }"
+                +
                 ".msg-actions { display: flex; gap: 10px; align-items: center; }" +
-
-                /* CSS cho nút bấm */
                 ".btn-like { background: none; border: 1px solid #ef4444; color: #ef4444; padding: 5px 12px; border-radius: 15px; cursor: pointer; transition: 0.2s; }"
                 +
                 ".btn-like:hover { background: #ef4444; color: white; }" +
-
                 ".btn-dislike { background: none; border: 1px solid #64748b; color: #94a3b8; padding: 5px 12px; border-radius: 15px; cursor: pointer; transition: 0.2s; }"
                 +
                 ".btn-dislike:hover { border-color: #cbd5e1; color: #fff; }" +
-
                 ".btn-hide { background: none; border: none; color: #475569; padding: 5px 12px; cursor: pointer; font-size: 0.9em; }"
                 +
                 ".btn-hide:hover { color: #94a3b8; }" +
-
                 ".post-form { display: flex; gap: 10px; margin-bottom: 20px; }" +
                 ".post-form input { flex: 1; padding: 12px; border-radius: 20px; border: none; background: #334155; color: white; outline: none; }"
                 +
@@ -369,53 +427,27 @@ public class Main {
                 ".btn-reload { padding: 10px 20px; background: var(--gold); border: none; border-radius: 20px; font-weight: bold; cursor: pointer; }"
                 +
                 ".back-btn { display: inline-block; margin-bottom: 15px; color: #38bdf8; text-decoration: none; }" +
-
                 "</style>" +
                 "<script>" +
-
-                // --- DANH SÁCH TỪ CẤM (Sửa ở đây) ---
-                "var BAD_WORDS = ['ngu', 'chó', 'chết', 'bậy', 'tục', 'điên', 'buồi', 'cặc', 'lồn','giết', 'buoi', 'cac','lon', 'giet','súc vật'];\n"
-                +
-
-                // 1. Hàm kiểm duyệt trước khi gửi
-                "function checkContent(event) {\n" +
-                "   var input = document.getElementsByName('thought')[0];\n" +
-                "   var content = input.value.toLowerCase();\n" +
-                "   \n" +
-                "   for (var i = 0; i < BAD_WORDS.length; i++) {\n" +
-                "       if (content.includes(BAD_WORDS[i])) {\n" +
-                "           alert('⚠️ CẢNH BÁO: Bình luận của bạn vi phạm tiêu chuẩn cộng đồng! Vui lòng sử dụng ngôn từ văn minh.');\n"
-                +
-                "           event.preventDefault(); // Chặn không cho gửi đi\n" +
-                "           return false;\n" +
-                "       }\n" +
-                "   }\n" +
-                "   return true;\n" +
-                "}\n" +
-
-                // 2. Logic ẩn bài viết cũ
-                "document.addEventListener('DOMContentLoaded', function() {\n" +
-                "   var form = document.querySelector('.post-form');\n" +
-                "   if(form) form.setAttribute('onsubmit', 'return checkContent(event)');\n" + // Gắn bộ lọc vào form
-                "   \n" +
-                "   var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');\n" +
-                "   hiddenList.forEach(function(id) {\n" +
-                "       var el = document.getElementById('post-' + id);\n" +
-                "       if(el) el.style.display = 'none';\n" +
-                "   });\n" +
-                "});\n" +
-
-                "function hidePost(id) {\n" +
-                "   var element = document.getElementById('post-' + id);\n" +
-                "   if(element) {\n" +
-                "       element.style.opacity = '0';\n" +
-                "       setTimeout(function(){ element.style.display = 'none'; }, 500);\n" +
-                "       var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');\n" +
-                "       if (!hiddenList.includes(id)) {\n" +
-                "           hiddenList.push(id);\n" +
-                "           localStorage.setItem('hidden_posts', JSON.stringify(hiddenList));\n" +
-                "       }\n" +
-                "   }\n" +
+                // Vẫn giữ script ẩn bài cũ
+                "document.addEventListener('DOMContentLoaded', function() {" +
+                "  var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');" +
+                "  hiddenList.forEach(function(id) {" +
+                "      var el = document.getElementById('post-' + id);" +
+                "      if(el) el.style.display = 'none';" +
+                "  });" +
+                "});" +
+                "function hidePost(id) {" +
+                "  var element = document.getElementById('post-' + id);" +
+                "  if(element) {" +
+                "      element.style.opacity = '0';" +
+                "      setTimeout(function(){ element.style.display = 'none'; }, 500);" +
+                "      var hiddenList = JSON.parse(localStorage.getItem('hidden_posts') || '[]');" +
+                "      if (!hiddenList.includes(id)) {" +
+                "          hiddenList.push(id);" +
+                "          localStorage.setItem('hidden_posts', JSON.stringify(hiddenList));" +
+                "      }" +
+                "  }" +
                 "}" +
                 "</script></head><body>";
     }
