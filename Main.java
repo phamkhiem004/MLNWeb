@@ -50,18 +50,29 @@ public class Main {
         initData();
         loadPostsFromFile(); // Nạp dữ liệu cũ
 
+        // --- SỬA ĐỔI QUAN TRỌNG CHO RENDER ---
+        // Mặc định là 8080 (để chạy thử trên máy bạn)
         int port = 8080;
+        // Nếu Server (Render) cấp cổng qua biến môi trường PORT, thì dùng cổng đó
+        if (System.getenv("PORT") != null) {
+            port = Integer.parseInt(System.getenv("PORT"));
+        }
+
+        System.out.println("Server đang khởi động tại cổng: " + port);
+
+        // Lưu ý: "0.0.0.0" là bắt buộc để Render có thể truy cập được từ bên ngoài
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
+        // -------------------------------------
 
         server.createContext("/", new HomeHandler());
         server.createContext("/room", new RoomHandler());
         server.createContext("/post", new PostHandler());
         server.createContext("/like", new LikeHandler());
-        server.createContext("/dislike", new DislikeHandler()); // <--- MỚI: Xử lý dislike
+        server.createContext("/dislike", new DislikeHandler());
 
         server.setExecutor(null);
         server.start();
-        System.out.println("Server chạy tại http://localhost:" + port);
+        System.out.println("Server đã chạy thành công!");
     }
 
     // --- 1. XỬ LÝ DATABASE (CẬP NHẬT ĐỂ ĐỌC ĐƯỢC DISLIKE) ---
